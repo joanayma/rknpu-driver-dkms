@@ -14,10 +14,31 @@
 #include <linux/shmem_fs.h>
 #include <linux/dma-buf.h>
 #include <linux/iommu.h>
-#include <linux/pfn_t.h>
+#include <linux/mm.h>
+#include <linux/vmalloc.h>
 #include <linux/version.h>
-#include <linux/version_compat_defs.h>
+#if KERNEL_VERSION(7, 0, 0) > LINUX_VERSION_CODE
+#include <linux/pfn_t.h>
+#endif
 #include <asm/cacheflush.h>
+
+#ifndef CONFIG_ARM64
+static inline void __dma_map_area(const void *addr, size_t size,
+				  enum dma_data_direction dir) { }
+static inline void __dma_unmap_area(const void *addr, size_t size,
+				    enum dma_data_direction dir) { }
+static inline void dcache_clean_poc(unsigned long start, unsigned long end) { }
+static inline void dcache_inval_poc(unsigned long start, unsigned long end) { }
+#endif
+
+#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
+#ifndef vm_flags_set
+#define vm_flags_set(vma, flags)	((vma)->vm_flags |= (flags))
+#endif
+#ifndef vm_flags_clear
+#define vm_flags_clear(vma, flags)	((vma)->vm_flags &= ~(flags))
+#endif
+#endif
 
 #if KERNEL_VERSION(5, 10, 0) <= LINUX_VERSION_CODE
 #include <linux/dma-map-ops.h>
@@ -447,10 +468,15 @@ static int rknpu_iommu_map_with_cache_sgt(struct iommu_domain *domain,
 	for_each_sgtable_sg(rknpu_dev->cache_sgt[index], s, i) {
 		cache_start = rknpu_dev->nbuf_start + s->offset;
 		size = length < s->length ? length : s->length;
+#if KERNEL_VERSION(6, 12, 0) <= LINUX_VERSION_CODE
+		ret = iommu_map(domain, iova_start, cache_start, size,
+				IOMMU_READ | IOMMU_WRITE, GFP_KERNEL);
+#else
 		ret = iommu_map(domain, iova_start, cache_start, size,
 				IOMMU_READ | IOMMU_WRITE);
+#endif
 		if (ret) {
-			LOG_ERROR("cache iommu_map error: %d\n", ret);
+			LOG_ERROR("iommu map cache region failed\n");
 			return ret;
 		}
 		length -= size;
@@ -546,9 +572,15 @@ static int rknpu_gem_alloc_buf_with_cache(struct rknpu_gem_object *rknpu_obj,
 	 *
 	 */
 	if (!rknpu_obj->cache_with_sgt)
+#if KERNEL_VERSION(6, 12, 0) <= LINUX_VERSION_CODE
+		ret = iommu_map(domain, rknpu_obj->iova_start,
+				cache_start + cache_offset, cache_size,
+				IOMMU_READ | IOMMU_WRITE, GFP_KERNEL);
+#else
 		ret = iommu_map(domain, rknpu_obj->iova_start,
 				cache_start + cache_offset, cache_size,
 				IOMMU_READ | IOMMU_WRITE);
+#endif
 	else
 		ret = rknpu_iommu_map_with_cache_sgt(domain, rknpu_dev,
 						     rknpu_obj, cache_size);
@@ -593,8 +625,13 @@ static int rknpu_gem_alloc_buf_with_cache(struct rknpu_gem_object *rknpu_obj,
 	for_each_sg(rknpu_obj->sgt->sgl, s, rknpu_obj->sgt->nents, i) {
 		size = (length < s->length) ? length : s->length;
 
+#if KERNEL_VERSION(6, 12, 0) <= LINUX_VERSION_CODE
+		ret = iommu_map(domain, offset, sg_phys(s), size,
+				IOMMU_READ | IOMMU_WRITE, GFP_KERNEL);
+#else
 		ret = iommu_map(domain, offset, sg_phys(s), size,
 				IOMMU_READ | IOMMU_WRITE);
+#endif
 		if (ret) {
 			LOG_ERROR("ddr iommu_map error: %d\n", ret);
 			goto sgl_unmap;
@@ -1269,8 +1306,12 @@ vm_fault_t rknpu_gem_fault(struct vm_fault *vmf)
 	}
 
 	pfn = page_to_pfn(rknpu_obj->pages[page_offset]);
+#if KERNEL_VERSION(7, 0, 0) <= LINUX_VERSION_CODE
+	return vmf_insert_mixed(vma, vmf->address, pfn);
+#else
 	return vmf_insert_mixed(vma, vmf->address,
 				__pfn_to_pfn_t(pfn, PFN_DEV));
+#endif
 }
 #elif KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
 int rknpu_gem_fault(struct vm_fault *vmf)

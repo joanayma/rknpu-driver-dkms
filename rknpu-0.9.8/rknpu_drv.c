@@ -7,6 +7,7 @@
 #include <linux/dma-buf.h>
 #include <linux/dma-mapping.h>
 #include <linux/fs.h>
+#include <linux/hrtimer.h>
 #include <linux/interrupt.h>
 #include <linux/irqdomain.h>
 #include <linux/iopoll.h>
@@ -293,6 +294,10 @@ static const struct of_device_id rknpu_of_match[] = {
 	},
 	{
 		.compatible = "rockchip,rk3568-rknpu",
+		.data = &rk356x_rknpu_config,
+	},
+	{
+		.compatible = "rockchip,rk3566-rknpu",
 		.data = &rk356x_rknpu_config,
 	},
 	{
@@ -698,20 +703,7 @@ static const struct file_operations rknpu_drm_driver_fops = {
 #endif
 
 static struct drm_driver rknpu_drm_driver = {
-#if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
 	.driver_features = DRIVER_GEM | DRIVER_RENDER,
-#else
-	.driver_features = DRIVER_GEM | DRIVER_PRIME | DRIVER_RENDER,
-#endif
-#if KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE
-	.gem_free_object_unlocked = rknpu_gem_free_object,
-	.gem_vm_ops = &rknpu_gem_vm_ops,
-	.dumb_destroy = drm_gem_dumb_destroy,
-	.gem_prime_export = drm_gem_prime_export,
-	.gem_prime_get_sg_table = rknpu_gem_prime_get_sg_table,
-	.gem_prime_vmap = rknpu_gem_prime_vmap,
-	.gem_prime_vunmap = rknpu_gem_prime_vunmap,
-#endif
 	.dumb_create = rknpu_gem_dumb_create,
 #if KERNEL_VERSION(4, 19, 0) > LINUX_VERSION_CODE
 	.dumb_map_offset = rknpu_gem_dumb_map_offset,
@@ -726,17 +718,21 @@ static struct drm_driver rknpu_drm_driver = {
 	.gem_prime_import = drm_gem_prime_import,
 #endif
 	.gem_prime_import_sg_table = rknpu_gem_prime_import_sg_table,
+#if KERNEL_VERSION(6, 12, 0) > LINUX_VERSION_CODE
 #if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
 	.gem_prime_mmap = drm_gem_prime_mmap,
 #else
 	.gem_prime_mmap = rknpu_gem_prime_mmap,
+#endif
 #endif
 	.ioctls = rknpu_ioctls,
 	.num_ioctls = ARRAY_SIZE(rknpu_ioctls),
 	.fops = &rknpu_drm_driver_fops,
 	.name = DRIVER_NAME,
 	.desc = DRIVER_DESC,
+#if KERNEL_VERSION(6, 12, 0) > LINUX_VERSION_CODE
 	.date = DRIVER_DATE,
+#endif
 	.major = DRIVER_MAJOR,
 	.minor = DRIVER_MINOR,
 	.patchlevel = DRIVER_PATCHLEVEL,
@@ -781,8 +777,13 @@ static enum hrtimer_restart hrtimer_handler(struct hrtimer *timer)
 static void rknpu_init_timer(struct rknpu_device *rknpu_dev)
 {
 	rknpu_dev->kt = ktime_set(0, RKNPU_LOAD_INTERVAL);
+#if KERNEL_VERSION(6, 12, 0) <= LINUX_VERSION_CODE
+	hrtimer_setup(&rknpu_dev->timer, hrtimer_handler, CLOCK_MONOTONIC,
+		      HRTIMER_MODE_REL);
+#else
 	hrtimer_init(&rknpu_dev->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	rknpu_dev->timer.function = hrtimer_handler;
+#endif
 	hrtimer_start(&rknpu_dev->timer, rknpu_dev->kt, HRTIMER_MODE_REL);
 }
 
@@ -1526,7 +1527,7 @@ err_remove_drv:
 	return ret;
 }
 
-static int rknpu_remove(struct platform_device *pdev)
+static void rknpu_remove(struct platform_device *pdev)
 {
 	struct rknpu_device *rknpu_dev = platform_get_drvdata(pdev);
 	int i = 0;
@@ -1586,8 +1587,6 @@ static int rknpu_remove(struct platform_device *pdev)
 	}
 
 	pm_runtime_disable(&pdev->dev);
-
-	return 0;
 }
 
 #ifndef FPGA_PLATFORM
@@ -1660,5 +1659,5 @@ MODULE_LICENSE("GPL v2");
 MODULE_VERSION(RKNPU_GET_DRV_VERSION_STRING(DRIVER_MAJOR, DRIVER_MINOR,
 					    DRIVER_PATCHLEVEL));
 #if KERNEL_VERSION(5, 16, 0) < LINUX_VERSION_CODE
-MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS("DMA_BUF");
 #endif

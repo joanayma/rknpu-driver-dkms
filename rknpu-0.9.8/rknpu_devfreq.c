@@ -22,11 +22,7 @@ static struct monitor_dev_profile npu_mdevp = {
 	.type = MONITOR_TYPE_DEV,
 	.low_temp_adjust = rockchip_monitor_dev_low_temp_adjust,
 	.high_temp_adjust = rockchip_monitor_dev_high_temp_adjust,
-#if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
-	.check_rate_volt = rockchip_monitor_check_rate_volt,
-#else
 	.update_volt = rockchip_monitor_check_rate_volt,
-#endif
 };
 
 static int npu_devfreq_get_dev_status(struct device *dev,

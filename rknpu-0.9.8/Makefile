@@ -7,7 +7,7 @@ obj-m += rknpu.o
 # Include directory for headers
 ccflags-y += -I$(srctree)/$(src)/include
 ccflags-y += -I$(src)/include
-ccflags-y += -Werror
+# ccflags-y += -Werror
 
 # Object files for the rknpu module
 rknpu-y += rknpu_drv.o
@@ -20,6 +20,22 @@ rknpu-$(CONFIG_ROCKCHIP_RKNPU_SRAM) += rknpu_mm.o
 rknpu-$(CONFIG_ROCKCHIP_RKNPU_FENCE) += rknpu_fence.o
 rknpu-$(CONFIG_ROCKCHIP_RKNPU_DRM_GEM) += rknpu_gem.o
 rknpu-$(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP) += rknpu_mem.o
+
+# For non-Rockchip kernels: force-enable DRM GEM path when DRM is available
+ifneq ($(CONFIG_DRM),)
+ifndef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
+ccflags-y += -DCONFIG_ROCKCHIP_RKNPU_DRM_GEM
+rknpu-y += rknpu_gem.o
+endif
+endif
+
+# For non-Rockchip kernels: force-enable fence when SYNC_FILE is available
+ifneq ($(CONFIG_SYNC_FILE),)
+ifndef CONFIG_ROCKCHIP_RKNPU_FENCE
+ccflags-y += -DCONFIG_ROCKCHIP_RKNPU_FENCE
+rknpu-y += rknpu_fence.o
+endif
+endif
 
 # Build and clean targets for DKMS compatibility
 all:

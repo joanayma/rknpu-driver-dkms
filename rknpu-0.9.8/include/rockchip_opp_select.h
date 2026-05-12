@@ -42,11 +42,26 @@ struct volt_rm_table {
 struct rockchip_opp_data {
 	int (*get_soc_info)(struct device *dev, struct device_node *np,
 			    int *bin, int *process);
+#if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
+	int (*set_soc_info)(struct device *dev, struct device_node *np,
+			    struct rockchip_opp_info *opp_info);
+#else
 	int (*set_soc_info)(struct device *dev, struct device_node *np,
 			    int bin, int process, int volt_sel);
+#endif
 	int (*set_read_margin)(struct device *dev,
 			       struct rockchip_opp_info *opp_info,
 			       u32 rm);
+#if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
+	int (*config_regulators)(struct device *dev,
+				 struct dev_pm_opp *old_opp,
+				 struct dev_pm_opp *new_opp,
+				 struct regulator **regulators,
+				 unsigned int count);
+	int (*config_clks)(struct device *dev, struct opp_table *opp_table,
+			   struct dev_pm_opp *opp, void *data,
+			   bool scaling_down);
+#endif
 };
 
 struct pvtpll_opp_table {
@@ -80,6 +95,17 @@ struct rockchip_opp_info {
 	u32 target_rm;
 	u32 pvtpll_clk_id;
 	bool pvtpll_low_temp;
+#if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
+	bool is_rate_volt_checked;
+	bool is_scmi_clk;
+	bool is_runtime_active;
+	struct clk *clk;
+	int nclocks;
+	struct clk_bulk_data *clocks;
+	u32 supported_hw[2];
+	int volt_sel;
+	int bin;
+#endif
 };
 
 #if IS_ENABLED(CONFIG_ROCKCHIP_OPP)
@@ -135,6 +161,25 @@ int rockchip_init_opp_table(struct device *dev,
 			    char *lkg_name, char *reg_name);
 void rockchip_uninit_opp_table(struct device *dev,
 			       struct rockchip_opp_info *info);
+int rockchip_opp_config_regulators(struct device *dev,
+				   struct dev_pm_opp *old_opp,
+				   struct dev_pm_opp *new_opp,
+				   struct regulator **regulators,
+				   unsigned int count,
+				   struct rockchip_opp_info *opp_info);
+int rockchip_opp_config_clks(struct device *dev, struct opp_table *opp_table,
+			     struct dev_pm_opp *opp, void *data,
+			     bool scaling_down,
+			     struct rockchip_opp_info *opp_info);
+void rockchip_opp_dvfs_lock(struct rockchip_opp_info *info);
+void rockchip_opp_dvfs_unlock(struct rockchip_opp_info *info);
+#if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
+int rockchip_opp_set_low_length(struct device *dev, struct device_node *np,
+				struct rockchip_opp_info *opp_info);
+#else
+int rockchip_opp_set_low_length(struct device *dev, struct device_node *np,
+				int bin, int process, int volt_sel);
+#endif
 #else
 static inline int rockchip_of_get_leakage(struct device *dev, char *lkg_name,
 					  int *leakage)
@@ -280,6 +325,49 @@ static inline void rockchip_uninit_opp_table(struct device *dev,
 					     struct rockchip_opp_info *info)
 {
 }
+
+static inline int rockchip_opp_config_regulators(struct device *dev,
+						 struct dev_pm_opp *old_opp,
+						 struct dev_pm_opp *new_opp,
+						 struct regulator **regulators,
+						 unsigned int count,
+						 struct rockchip_opp_info *opp_info)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline int rockchip_opp_config_clks(struct device *dev,
+					   struct opp_table *opp_table,
+					   struct dev_pm_opp *opp, void *data,
+					   bool scaling_down,
+					   struct rockchip_opp_info *opp_info)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline void rockchip_opp_dvfs_lock(struct rockchip_opp_info *info)
+{
+}
+
+static inline void rockchip_opp_dvfs_unlock(struct rockchip_opp_info *info)
+{
+}
+
+#if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
+static inline int rockchip_opp_set_low_length(struct device *dev,
+					      struct device_node *np,
+					      struct rockchip_opp_info *opp_info)
+{
+	return -EOPNOTSUPP;
+}
+#else
+static inline int rockchip_opp_set_low_length(struct device *dev,
+					      struct device_node *np,
+					      int bin, int process, int volt_sel)
+{
+	return -EOPNOTSUPP;
+}
+#endif
 
 #endif /* CONFIG_ROCKCHIP_OPP */
 

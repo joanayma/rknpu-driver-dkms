@@ -12,6 +12,8 @@
 
 #define RKNPU_SWITCH_DOMAIN_WAIT_TIME_MS 6000
 
+#ifdef CONFIG_IOMMU_DMA
+
 dma_addr_t rknpu_iommu_dma_alloc_iova(struct iommu_domain *domain, size_t size,
 				      u64 dma_limit, struct device *dev,
 				      bool size_aligned)
@@ -122,8 +124,11 @@ static int __finalise_sg(struct device *dev, struct scatterlist *sg, int nents,
 		sg_dma_address(s) = DMA_MAPPING_ERROR;
 		sg_dma_len(s) = 0;
 
-#if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
+#if KERNEL_VERSION(6, 9, 0) <= LINUX_VERSION_CODE
+		if (sg_dma_is_bus_address(s)) {
+#else
 		if (sg_is_dma_bus_address(s)) {
+#endif
 			if (i > 0)
 				cur = sg_next(cur);
 
@@ -135,7 +140,6 @@ static int __finalise_sg(struct device *dev, struct scatterlist *sg, int nents,
 			cur_len = 0;
 			continue;
 		}
-#endif
 
 		s->offset += s_iova_off;
 		s->length = s_length;
@@ -181,7 +185,11 @@ static void __invalidate_sg(struct scatterlist *sg, int nents)
 
 #if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
 	for_each_sg(sg, s, nents, i) {
+#if KERNEL_VERSION(6, 9, 0) <= LINUX_VERSION_CODE
+		if (sg_dma_is_bus_address(s)) {
+#else
 		if (sg_is_dma_bus_address(s)) {
+#endif
 			sg_dma_unmark_bus_address(s);
 		} else {
 			if (sg_dma_address(s) != DMA_MAPPING_ERROR)
@@ -274,7 +282,11 @@ int rknpu_iommu_dma_map_sg(struct device *dev, struct scatterlist *sg,
 		goto out_restore_sg;
 	}
 
+#if KERNEL_VERSION(6, 10, 0) <= LINUX_VERSION_CODE
+	ret = iommu_map_sg(domain, iova, sg, nents, prot, GFP_KERNEL);
+#else
 	ret = iommu_map_sg(domain, iova, sg, nents, prot);
+#endif
 	if (ret < 0 || ret < iova_len) {
 		LOG_ERROR("failed to map SG: %zd\n", ret);
 		goto out_free_iova;
@@ -318,7 +330,11 @@ void rknpu_iommu_dma_unmap_sg(struct device *dev, struct scatterlist *sg,
 	 * just have to be determined.
 	 */
 	for_each_sg(sg, tmp, nents, i) {
+#if KERNEL_VERSION(6, 9, 0) <= LINUX_VERSION_CODE
+		if (sg_dma_is_bus_address(tmp)) {
+#else
 		if (sg_is_dma_bus_address(tmp)) {
+#endif
 			sg_dma_unmark_bus_address(tmp);
 			continue;
 		}
@@ -332,7 +348,11 @@ void rknpu_iommu_dma_unmap_sg(struct device *dev, struct scatterlist *sg,
 
 	nents -= i;
 	for_each_sg(tmp, tmp, nents, i) {
+#if KERNEL_VERSION(6, 9, 0) <= LINUX_VERSION_CODE
+		if (sg_dma_is_bus_address(tmp)) {
+#else
 		if (sg_is_dma_bus_address(tmp)) {
+#endif
 			sg_dma_unmark_bus_address(tmp);
 			continue;
 		}
@@ -364,7 +384,40 @@ void rknpu_iommu_dma_unmap_sg(struct device *dev, struct scatterlist *sg,
 	}
 }
 
+#else /* !CONFIG_IOMMU_DMA */
+
+dma_addr_t rknpu_iommu_dma_alloc_iova(struct iommu_domain *domain, size_t size,
+				      u64 dma_limit, struct device *dev,
+				      bool size_aligned)
+{
+	return 0;
+}
+
+void rknpu_iommu_dma_free_iova(struct rknpu_iommu_dma_cookie *cookie,
+			       dma_addr_t iova, size_t size, bool size_aligned)
+{
+}
+
+int rknpu_iommu_dma_map_sg(struct device *dev, struct scatterlist *sg,
+			   int nents, enum dma_data_direction dir,
+			   bool iova_aligned)
+{
+	return 0;
+}
+
+void rknpu_iommu_dma_unmap_sg(struct device *dev, struct scatterlist *sg,
+			      int nents, enum dma_data_direction dir,
+			      bool iova_aligned)
+{
+}
+
+#endif /* CONFIG_IOMMU_DMA */
+
 #if defined(CONFIG_IOMMU_API) && defined(CONFIG_NO_GKI)
+
+#ifndef __IOMMU_DOMAIN_DMA_API
+#define __IOMMU_DOMAIN_DMA_API 0
+#endif
 
 #if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
 struct iommu_group {
